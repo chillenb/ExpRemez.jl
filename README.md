@@ -1,5 +1,5 @@
-ExpRemez
-========
+ExpRemez.jl
+===========
 
 Generation of minimax grids for imaginary time Green's function and Laplace-transformed MP2 methods.
 
