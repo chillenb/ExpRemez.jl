@@ -4,7 +4,8 @@
 
 Newton's method to interpolate the exponential sum function at points `ξ` by finding appropriate parameters `params`.
 """
-function newton_interp_by_expsum!(n::Int64, params::Array{T}, ξ::Array{T};
+function newton_interp!(n::Int64, params::Array{T}, ξ::Array{T};
+    funcs,
     sched=ParameterSchedulers.Constant(T(1)),
     maxdiff=T(1.1),
     maxiter=Inf,
@@ -20,8 +21,7 @@ function newton_interp_by_expsum!(n::Int64, params::Array{T}, ξ::Array{T};
     dp = similar(ξ, 2 * n)
     while true
         rate = T(sched(iter))
-        expsum_eval!(params[1:n], params[n+1:end], ξ, resid)
-        resid .= resid .- 1 ./ ξ
+        @views resid = funcs.err_eval(params[1:n], params[n+1:end], ξ)
 
         if maximum(abs.(resid)) < tol
             break
@@ -30,67 +30,73 @@ function newton_interp_by_expsum!(n::Int64, params::Array{T}, ξ::Array{T};
             error("Failed to converge")
         end
 
-        expsum_jacobian!(n, params, ξ, ∇F)
+        funcs.jacobian!(n, params, ξ, ∇F)
         dp .= ∇F \ resid
         ratio = maximum(abs.(dp ./ params) ./ maxdiff)
         if ratio > 1
             rate /= ratio
         end
-        params .+= rate * dp
+        params .-= rate * dp
 
         iter += 1
     end
 end
+
+newton_interp_by_expsum! = newton_interp!
 
 """
     newton_interp_by_expsum(n, params, ξ)
 
 Newton's method to interpolate the exponential sum function at points `ξ` by finding appropriate parameters `params`.
 """
-function newton_interp_by_expsum(n::Int64, params::Array{T}, ξ::Array{T};
-    sched=ParameterSchedulers.Constant(T(1)),
-    maxdiff=T(1.1),
-    maxiter=Inf,
-    tol=T(0.0)) where {T}
+function newton_interp(n::Int64, params::Array{T}, ξ::Array{T};kws...) where {T}
     params_copy = copy(params)
-    newton_interp_by_expsum!(n, params_copy, ξ, sched=sched, maxdiff=maxdiff, maxiter=maxiter, tol=tol)
+    newton_interp!(n, params_copy, ξ; kws...)
     return params_copy
 end
+
+newton_interp_by_expsum = newton_interp
 
 """
     get_extrema_unbounded(n, params, ξ, R)
 
 Compute the extrema of the the error on the intervals [1, ξ[1]], [ξ[1], ξ[2]], ..., [ξ[2n-1], ξ[2n]], [ξ[2n], Inf].
 """
-function get_extrema_unbounded(n::Int64, params::Array{T}, ξ::Array{T}; abs_tol=0.0) where {T}
+function get_extrema_unbounded(n::Int64, params::Array{T}, ξ::Array{T}; abs_tol=0.0,
+    funcs) where {T}
     if abs_tol != 0.0
         tol = T(abs_tol)
     else
         tol = eps(T(1.0)) * 1e3
     end
     pts = [T(1); ξ]
-    feval = NonlinearFunction(fderiv_scalar)
+    @views coeffs, exponents = params[1:n], params[n+1:end]
+    fder(x) = funcs.errderiv_eval(coeffs, exponents, x)[1]
+    f(x) = funcs.err_eval(coeffs, exponents, x)[1]
+    fder_compat(x,p) = funcs.errderiv_eval(coeffs, exponents, x)[1]
+
+    fder_function = NonlinearFunction(fder_compat)
     μ = T.(zeros(2 * n + 1))
     for i = 1:2*n
-        if sign(fderiv_scalar(pts[i], params)) != sign(fderiv_scalar(pts[i+1], params))
-            prob = IntervalNonlinearProblem(feval, (pts[i], pts[i+1]), params)
+        if sign(fder(pts[i])) != sign(fder(pts[i+1]))
+            prob = IntervalNonlinearProblem(fder_function, (pts[i], pts[i+1]))
             μ[i] = solve(prob, abstol=T(tol), Brent()).u
         else
-            μ[i] = (abs(fscalar(pts[i], params)) > abs(fscalar(pts[i+1], params))) ? pts[i] : pts[i+1]
+            μ[i] = (abs(f(pts[i])) > abs(f(pts[i+1]))) ? pts[i] : pts[i+1]
         end
     end
-    deriv_last_point = fderiv_scalar(pts[2*n+1], params)
+    deriv_last_point = fder(pts[2*n+1])
     if sign(deriv_last_point) < 0
         # There's no extremum afterwards
         μ[2*n+1] = Inf
     else
         # Step 1. Find a point where the derivative is negative
         c = pts[2*n+1] * 10
-        while sign(fderiv_scalar(c, params)) >= 0
+        while sign(fder(c)) >= 0
             c *= 10
         end
         # Step 2. Find the extremum
-        prob = IntervalNonlinearProblem(feval, (pts[2*n+1], c), params)
+        prob = IntervalNonlinearProblem(fder_function, (pts[2*n+1], c))
         μ[2*n+1] = solve(prob, abstol=T(tol)).u
     end
     return μ
@@ -109,8 +115,8 @@ end
 
 Compute the extrema of the the error on the intervals [1, ξ[1]], [ξ[1], ξ[2]], ..., [ξ[2n-1], ξ[2n]], [ξ[2n], R].
 """
-function get_extrema_bounded(n::Int64, params::Array{T}, ξ::Array{T}, R; abs_tol=0.0) where {T}
-    μ = get_extrema_unbounded(n, params, ξ; abs_tol=abs_tol)
+function get_extrema_bounded(n::Int64, params::Array{T}, ξ::Array{T}, R; abs_tol=0.0, kws...) where {T}
+    μ = get_extrema_unbounded(n, params, ξ; abs_tol=abs_tol, kws...)
     bound_extrema!(n, μ, R)
     return μ
 end
@@ -121,9 +127,9 @@ end
 Check if the grid has R = Inf. Such a grid has the equioscillation property at the
     very last extremum.
 """
-function is_R_inf(grd::MinimaxGrid{T}) where {T}
+function is_R_inf(grd::MinimaxGrid{T}; funcs) where {T}
     μ = grd.extrema
-    fvals_μ = fscalar.(μ, Ref(merge_params(grd.n, grd.coefs, grd.exponents)))
+    fvals_μ = funcs.err_eval(grd.coefs, grd.gridpts, μ)
     fvals_abs = abs.(fvals_μ)
     err_ratio = fvals_abs[end] / fvals_abs[end-1]
     if err_ratio > 1.01 || err_ratio < 0.99
@@ -134,129 +140,173 @@ end
 
 
 
-function compute_minimax_grid(n, params::Array{T}, pts::Array{T}, R;
+function compute_minimax_grid(start::MinimaxGrid{T}, R;
     outersched=ParameterSchedulers.Constant(T(1)),
     innersched=ParameterSchedulers.Constant(T(1)),
     tol=0.0,
     tol_inner=0.0,
     maxiter_inner=Inf,
-    maxiter=Inf) where {T}
+    maxiter=Inf,
+    funcs) where {T}
     tol = T(tol)
     tol_inner = T(tol_inner)
-    conv_err = T(1)
+
     R = T(R)
+    n = start.n
+    params = merge_params(start.n, start.coefs, start.gridpts)
+    pts = copy(start.interp_pts)
     if tol == T(0.0)
         tol = eps(T(1.0)) * 2 * n * 1e3
     end
     iter = 1
+    newton_interp!(n, params, pts, sched=innersched, maxiter=maxiter_inner, tol=tol_inner,
+    funcs=funcs)
+    mu = get_extrema_bounded(n, params, pts, R; funcs=funcs)
+    ph = funcs.alternant(n, params, mu)
+    conv_err = GenericLinearAlgebra.norm(ph)
+
     while conv_err > tol && iter <= maxiter
-        rate = T(outersched(iter))
-        newton_interp_by_expsum!(n, params, pts, sched=innersched, maxiter=maxiter_inner, tol=tol_inner)
-        mu = get_extrema_bounded(n, params, pts, R)
-        ph = phi(n, params, mu)
-        phg = phi_grad_xi(n, params, mu, pts)
-        pts = pts .- rate .* (phg \ ph)
+        stepsize = T(1)
+        mu = get_extrema_bounded(n, params, pts, R; funcs=funcs)
+        ph = funcs.alternant(n, params, mu)
+        phg = funcs.alternant_grad_xi(n, params, mu, pts)
+        update_vec = phg \ ph
+        linesearch_done = false
+        phnorm = GenericLinearAlgebra.norm(ph)
+        while !linesearch_done
+            if stepsize < 1e-10
+                error("Stepsize too small")
+            end
+            try
+                pts_new = pts .- stepsize * update_vec
+                params_new = copy(params)
+                newton_interp!(n, params_new, pts_new, sched=innersched, maxiter=maxiter_inner, tol=tol_inner,
+                    funcs=funcs)
+                mu_new = get_extrema_bounded(n, params_new, pts_new, R; funcs=funcs)
+                ph_new = funcs.alternant(n, params_new, mu_new)
+                if GenericLinearAlgebra.norm(ph_new) < phnorm
+                    pts .= pts_new
+                    ph .= ph_new
+                    params .= params_new
+                    linesearch_done = true
+                else
+                    println(GenericLinearAlgebra.norm(ph_new), " ", phnorm)
+                    println("Decreasing stepsize")
+                    stepsize /= 2
+                end
+            catch e
+                println("Newton failed, decreasing stepsize")
+                stepsize /= 2
+            end
+        end
         conv_err = GenericLinearAlgebra.norm(ph)
+        newton_interp!(n, params, pts, sched=innersched, maxiter=maxiter_inner, tol=tol_inner,
+            funcs=funcs)
         iter += 1
     end
     if conv_err > tol
         error("Failed to converge")
     end
-    coefs, exponents = params[1:n], params[n+1:end]
-    abs_err = maximum(abs, fscalar.(mu, Ref(params)))
-    mu_unbounded = get_extrema_unbounded(n, params, pts)
+    @views coefs, exponents = params[1:n], params[n+1:end]
+    f = (x)->begin funcs.err_eval(coefs, exponents, x) end
+    abs_err = maximum(abs, f(mu))
+    mu_unbounded = get_extrema_unbounded(n, params, pts; funcs=funcs)
     mu = bound_extrema(n, mu_unbounded, R)
-    abs_err = maximum(abs, fscalar.(mu, Ref(params)))
+    abs_err = maximum(abs, f(mu))
     grd = MinimaxGrid(n, sort(coefs), sort(exponents), sort(pts), sort(mu_unbounded), abs_err, R)
-    if is_R_inf(grd)
+    if is_R_inf(grd; funcs=funcs)
         grd.R = Inf
     end
     return grd
 end
 
-"""
-    upgrade_gridsize(grd::MinimaxGrid)
+include("UpgradeGrid.jl")
 
-Try to create a new grid with a larger size from the existing grid.
-Works best with R large.
-"""
-function upgrade_gridsize(grd::MinimaxGrid{T}) where {T}
-    conv_err = T(1)
-    R = maximum(grd.extrema)
+# """
+#     upgrade_gridsize(grd::MinimaxGrid)
 
-    if grd.n > 1
-        b_ratio = grd.exponents[1] / grd.exponents[2]
-        a_ratio = grd.coefs[1] / grd.coefs[2]
-        xi_ratio = grd.interp_pts[end] / grd.interp_pts[end-1]
-    else
-        b_ratio = 0.5
-        a_ratio = 0.5
-        xi_ratio = 2
-    end
+# Try to create a new grid with a larger size from the existing grid.
+# Works best with R large.
+# """
+# function upgrade_gridsize(grd::MinimaxGrid{T}, funcs) where {T}
+#     conv_err = T(1)
+#     R = maximum(grd.extrema)
 
-    a0 = max(a_ratio * grd.coefs[1], grd.err)
-    b0 = min(b_ratio * grd.exponents[1])
+#     if grd.n > 1
+#         b_ratio = grd.gridpts[1] / grd.gridpts[2]
+#         a_ratio = grd.coefs[1] / grd.coefs[2]
+#         xi_ratio = grd.interp_pts[end] / grd.interp_pts[end-1]
+#     else
+#         b_ratio = 0.5
+#         a_ratio = 0.5
+#         xi_ratio = 2
+#     end
 
-    pts = [grd.interp_pts; xi_ratio * grd.interp_pts[end]; xi_ratio^2 * grd.interp_pts[end]]
-    coefs = [a0; grd.coefs]
-    exponents = [b0; grd.exponents]
-    n = grd.n + 1
-    tol = eps(T(1.0)) * 2 * n * 1e3
-    iter = 1
+#     a0 = max(a_ratio * grd.coefs[1], grd.err)
+#     b0 = min(b_ratio * grd.gridpts[1])
 
-    params = merge_params(n, coefs, exponents)
-    rates = [0.125, T(1)]
-    times = [5]
-    heavydamping = ParameterSchedulers.Sequence(rates, times)
-    newton_interp_by_expsum!(n, params, pts, sched=heavydamping)
-    R = xi_ratio * pts[end]
+#     pts = [grd.interp_pts; xi_ratio * grd.interp_pts[end]; xi_ratio^2 * grd.interp_pts[end]]
+#     coefs = [a0; grd.coefs]
+#     exponents = [b0; grd.gridpts]
+#     n = grd.n + 1
+#     tol = eps(T(1.0)) * 2 * n * 1e3
+#     iter = 1
 
-    outersched = ParameterSchedulers.Sequence(
-        [0.05, 0.125, 0.5, 1],
-        [2, 4, 2]
-    )
+#     params = merge_params(n, coefs, exponents)
+#     rates = [0.125, T(1)]
+#     times = [5]
+#     heavydamping = ParameterSchedulers.Sequence(rates, times)
+#     newton_interp!(n, params, pts, sched=heavydamping; funcs=funcs)
+#     R = xi_ratio * pts[end]
 
-    while conv_err > tol
-        rate = T(outersched(iter))
-        newton_interp_by_expsum!(n, params, pts; maxiter=10)
-        mu = get_extrema_bounded(n, params, pts, R)
-        ph = phi(n, params, mu)
-        phg = phi_grad_xi(n, params, mu, pts)
-        pts = pts .- rate .* (phg \ ph)
-        conv_err = GenericLinearAlgebra.norm(ph)
-        iter += 1
-    end
+#     outersched = ParameterSchedulers.Sequence(
+#         [0.05, 0.125, 0.5, 1],
+#         [2, 4, 2]
+#     )
 
-    conv_err = T(1)
-    while conv_err > tol
-        rate = T(outersched(iter))
-        newton_interp_by_expsum!(n, params, pts)
-        mu = get_extrema_bounded(n, params, pts, R)
-        ph = phi(n, params, mu)
-        phg = phi_grad_xi(n, params, mu, pts)
-        pts = pts .- rate .* (phg \ ph)
-        conv_err = maximum(abs, ph)
-        iter += 1
-    end
+#     while conv_err > tol
+#         rate = T(outersched(iter))
+#         newton_interp!(n, params, pts; funcs=funcs, maxiter=10)
+#         mu = get_extrema_bounded(n, params, pts, R; funcs=funcs)
+#         ph = funcs.alternant(n, params, mu)
+#         phg = funcs.alternant_grad_xi(n, params, mu, pts)
+#         pts = pts .- rate .* (phg \ ph)
+#         conv_err = GenericLinearAlgebra.norm(ph)
+#         iter += 1
+#     end
 
-    coefs, exponents = params[1:n], params[n+1:end]
-    abs_err = maximum(abs, fscalar.(mu, Ref(params)))
-    mu_unbounded = get_extrema_unbounded(n, params, pts)
-    mu = bound_extrema(n, mu_unbounded, R)
-    abs_err = maximum(abs, fscalar.(mu, Ref(params)))
-    newgrd = MinimaxGrid(n, sort(coefs), sort(exponents), sort(pts), sort(mu_unbounded), abs_err, R)
-    if is_R_inf(newgrd)
-        newgrd.R = Inf
-    end
-    return newgrd
-end
+#     conv_err = T(1)
+#     while conv_err > tol
+#         rate = T(outersched(iter))
+#         newton_interp!(n, params, pts; funcs=funcs, maxiter=10)
+#         mu = get_extrema_bounded(n, params, pts, R; funcs=funcs)
+#         ph = funcs.alternant(n, params, mu)
+#         phg = funcs.alternant_grad_xi(n, params, mu, pts)
+#         pts = pts .- rate .* (phg \ ph)
+#         conv_err = GenericLinearAlgebra.norm(ph)
+#         iter += 1
+#     end
+
+#     @views coefs, exponents = params[1:n], params[n+1:end]
+#     f = (x)->begin funcs.err_eval(coefs, exponents, x) end
+
+#     abs_err = maximum(abs, f(mu))
+#     mu_unbounded = get_extrema_unbounded(n, params, pts; funcs=funcs)
+#     mu = bound_extrema(n, mu_unbounded, R)
+#     abs_err = maximum(abs, f(mu))
+#     newgrd = MinimaxGrid(n, sort(coefs), sort(exponents), sort(pts), sort(mu_unbounded), abs_err, R)
+#     if is_R_inf(newgrd; funcs=funcs)
+#         newgrd.R = Inf
+#     end
+#     return newgrd
+# end
 
 """
     expand_grid(grd::MinimaxGrid, R, expand_ratio)
 
 Continuation method for increasing the R of a grid.
 """
-function expand_grid(grd::MinimaxGrid{T}, R, expand_ratio) where {T}
+function expand_grid(grd::MinimaxGrid{T}, R, expand_ratio; funcs) where {T}
     # If the grid already has R = Inf, return it as is
     if isinf(grd.R)
         return grd
@@ -268,21 +318,19 @@ function expand_grid(grd::MinimaxGrid{T}, R, expand_ratio) where {T}
     @assert R > R0
     nsteps = ceil(Int, log(R / R0) / log(expand_ratio))
     Rs = logrange(R0, R, nsteps)[2:end]
-    coefs, exponents, pts, mu = grd.coefs, grd.exponents, grd.interp_pts, grd.extrema
+    coefs, exponents, pts, mu = grd.coefs, grd.gridpts, grd.interp_pts, grd.extrema
     params = merge_params(n, coefs, exponents)
-    newgrd = nothing
+    newgrd = grd
     for Ri in Rs
-        newgrd = compute_minimax_grid(n, params, pts, Ri)
+        newgrd = compute_minimax_grid(grd, Ri; funcs=funcs)
         if isinf(newgrd.R)
             break
         end
-        params = merge_params(n, newgrd.coefs, newgrd.exponents)
-        pts = newgrd.interp_pts
     end
     return newgrd
 end
 
-function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; verbose=false, start_fp64=true) where {T}
+function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; funcs,verbose=false, start_fp64=true) where {T}
     # If the grid already has R = Inf, return it as is
     R0 = isinf(grd.R) ? grd.extrema[end] : grd.R
     @assert R < R0
@@ -300,8 +348,6 @@ function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; verbose=false, start_
     else
         K = T
     end
-    params = merge_params(n, newgrd.coefs, newgrd.exponents)
-
 
     cur_R = R0
     err = newgrd.err
@@ -322,10 +368,10 @@ function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; verbose=false, start_
                     println("Shrinking ratio: ", Float64(shrink_ratio))
                 end
 
-                params = merge_params(n, newgrd.coefs, newgrd.exponents)
-                newpts = (newgrd.interp_pts .- 1) ./ K(shrink_ratio) .+ 1
+                newgrd.interp_pts .= (newgrd.interp_pts .- 1) ./ K(shrink_ratio) .+ 1
                 maxiter_inner = (K == Float64) ? 30 : 15
-                newgrd = compute_minimax_grid(n, params, newpts, K(next_R), tol=K(tol), tol_inner=K(0.5 * tol), maxiter_inner=maxiter_inner, maxiter=4)
+                newgrd = compute_minimax_grid(newgrd, K(next_R), tol=K(tol), tol_inner=K(0.5 * tol), maxiter_inner=maxiter_inner, maxiter=4; funcs=funcs)
+                @assert !isinf(newgrd.err)
                 conv = true
                 cur_R = next_R
                 err = newgrd.err
@@ -349,8 +395,7 @@ function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; verbose=false, start_
     if start_fp64
         newgrd = convert(MinimaxGrid{T}, newgrd)
     end
-    params = merge_params(n, newgrd.coefs, newgrd.exponents)
-    newgrd = compute_minimax_grid(n, params, newgrd.interp_pts, R,
+    newgrd = compute_minimax_grid(newgrd, R, funcs=funcs,
         innersched=ParameterSchedulers.Sequence([0.1, 1], [4]),
         outersched=ParameterSchedulers.Sequence([0.125, 1], [4])
     )
