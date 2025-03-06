@@ -1,8 +1,7 @@
-module Autocode
 
 using Symbolics
 using RuntimeGeneratedFunctions
-RuntimeGeneratedFunctions.init(Autocode)
+RuntimeGeneratedFunctions.init(@__MODULE__)
 
 function gen_funs(targetfn, basicexpr, b, x)
   #targetfn is usually 1/x
@@ -22,7 +21,7 @@ function gen_funs(targetfn, basicexpr, b, x)
         end)
   
   ex_target = Symbolics.build_function(targetfn, x, expression=false)
-  ex_target_deriv_x = Symbolics.build_function(Symbolics.derivative(targetfn, x), x, expression=false)
+  ex_target_deriv_x = Symbolics.build_function(Symbolics.derivative(targetfn, x, simplify=true), x, expression=false)
 
   target_eval = :((x) -> begin
           $ex_target.(x)
@@ -97,5 +96,4 @@ function gen_funs(targetfn, basicexpr, b, x)
           alternant_grad_xi=@RuntimeGeneratedFunction(alternant_grad_xi),
           dparams_dxi=@RuntimeGeneratedFunction(dparams_dxi))
 
-end
 end

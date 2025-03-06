@@ -4,7 +4,8 @@ using DoubleFloats
 using GenericLinearAlgebra
 using NonlinearSolve
 using JLD2
-import ParameterSchedulers
+
+using Symbolics
 import Base: convert
 
 using PrecompileTools: @setup_workload, @compile_workload    # this is a small dependency
@@ -23,6 +24,7 @@ export get_extrema_unbounded, bound_extrema, is_R_inf, _grd1inf
 export upgrade_gridsize, expand_grid, write_grid, shrink_grid
 
 export MinimaxGrid
+export write_grid
 export _freqgrd1inf_even
 
 include("MinimaxGridDef.jl")
@@ -58,5 +60,12 @@ include("Optimizer.jl")
 #     end
 # end
 
+@setup_workload begin
+  @compile_workload begin
+    grd = convert(MinimaxGrid{Double64}, _grd1inf)
+    @variables _x, _a, _b
+    funcs = gen_funs(1/_x, exp(-_b*_x), _b, _x);
+  end
+end
 
 end

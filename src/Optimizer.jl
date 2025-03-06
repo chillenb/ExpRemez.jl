@@ -1,4 +1,12 @@
 
+struct StepSizeException <: Exception
+    var :: String
+end
+struct MaxIterException <: Exception
+    var :: String
+end
+
+
 """
     newton_interp_by_expsum(n, params, ξ)
 
@@ -6,39 +14,65 @@ Newton's method to interpolate the exponential sum function at points `ξ` by fi
 """
 function newton_interp!(n::Int64, params::Array{T}, ξ::Array{T};
     funcs,
-    sched=ParameterSchedulers.Constant(T(1)),
     maxdiff=T(1.1),
-    maxiter=Inf,
-    tol=T(0.0)) where {T}
+    maxiter=20,
+    tol=T(0.0),
+    stepsize_min=T(1e-10),
+    verbose=false) where {T}
 
     if tol == T(0.0)
-        tol = eps(T(1.0)) * 1e3
+        tol = n * eps(T(1.0)) * 1e3
     end
 
     iter = 1
     ∇F = similar(ξ, 2 * n, 2 * n)
-    resid = similar(ξ, 2 * n)
     dp = similar(ξ, 2 * n)
+    new_params = similar(ξ, 2 * n)
+    new_resid = similar(ξ, 2 * n)
     while true
-        rate = T(sched(iter))
         @views resid = funcs.err_eval(params[1:n], params[n+1:end], ξ)
 
-        if maximum(abs.(resid)) < tol
+        err = GenericLinearAlgebra.norm(resid)
+
+        if err < tol
             break
         end
-        if iter > maxiter
-            error("Failed to converge")
-        end
+
+
 
         funcs.jacobian!(n, params, ξ, ∇F)
         dp .= ∇F \ resid
-        ratio = maximum(abs.(dp ./ params) ./ maxdiff)
-        if ratio > 1
-            rate /= ratio
+        ratio = maximum((dp ./ params) ./ maxdiff)
+        ratio = max(1, ratio)
+        ratio_stepsize = min(1, 1/ratio)
+
+        if iter > maxiter
+            throw(MaxIterException("Maxiter $maxiter reached; err $err;"))
         end
-        params .-= rate * dp
+
+        new_err = err + 1
+        stepsize = T(1)
+        while new_err >= err
+            #println("Inner stepsize: $stepsize")
+            new_params .= params .- ratio_stepsize * stepsize * dp
+            if any(new_params .< 0)
+                stepsize /= 2
+                continue
+            end
+            new_resid .= funcs.err_eval(new_params[1:n], new_params[n+1:end], ξ)
+            new_err = GenericLinearAlgebra.norm(new_resid)
+            stepsize /= 2
+            if stepsize < stepsize_min
+                throw(StepSizeException("Stepsize too small"))
+            end
+        end
+        #params .-= ratio_stepsize * rate * dp
+        params .= new_params
 
         iter += 1
+    end
+    if verbose
+        println("inner $iter")
     end
 end
 
@@ -141,12 +175,13 @@ end
 
 
 function compute_minimax_grid(start::MinimaxGrid{T}, R;
-    outersched=ParameterSchedulers.Constant(T(1)),
-    innersched=ParameterSchedulers.Constant(T(1)),
+    # outersched=ParameterSchedulers.Constant(T(1)),
+    # innersched=ParameterSchedulers.Constant(T(1)),
     tol=0.0,
     tol_inner=0.0,
     maxiter_inner=Inf,
     maxiter=Inf,
+    verbose=false,
     funcs) where {T}
     tol = T(tol)
     tol_inner = T(tol_inner)
@@ -159,7 +194,7 @@ function compute_minimax_grid(start::MinimaxGrid{T}, R;
         tol = eps(T(1.0)) * 2 * n * 1e3
     end
     iter = 1
-    newton_interp!(n, params, pts, sched=innersched, maxiter=maxiter_inner, tol=tol_inner,
+    newton_interp!(n, params, pts, maxiter=maxiter_inner, tol=tol_inner,
     funcs=funcs)
     mu = get_extrema_bounded(n, params, pts, R; funcs=funcs)
     ph = funcs.alternant(n, params, mu)
@@ -175,12 +210,12 @@ function compute_minimax_grid(start::MinimaxGrid{T}, R;
         phnorm = GenericLinearAlgebra.norm(ph)
         while !linesearch_done
             if stepsize < 1e-10
-                error("Stepsize too small")
+                raise(StepSizeException("Stepsize too small"))
             end
             try
                 pts_new = pts .- stepsize * update_vec
                 params_new = copy(params)
-                newton_interp!(n, params_new, pts_new, sched=innersched, maxiter=maxiter_inner, tol=tol_inner,
+                newton_interp!(n, params_new, pts_new, tol=tol_inner,
                     funcs=funcs)
                 mu_new = get_extrema_bounded(n, params_new, pts_new, R; funcs=funcs)
                 ph_new = funcs.alternant(n, params_new, mu_new)
@@ -190,17 +225,21 @@ function compute_minimax_grid(start::MinimaxGrid{T}, R;
                     params .= params_new
                     linesearch_done = true
                 else
-                    println(GenericLinearAlgebra.norm(ph_new), " ", phnorm)
-                    println("Decreasing stepsize")
+                    if verbose
+                        println(GenericLinearAlgebra.norm(ph_new), " ", phnorm)
+                        println("Decreasing stepsize")
+                    end
                     stepsize /= 2
                 end
             catch e
-                println("Newton failed, decreasing stepsize")
+                if verbose
+                    println("Newton failed, decreasing stepsize")
+                end
                 stepsize /= 2
             end
         end
         conv_err = GenericLinearAlgebra.norm(ph)
-        newton_interp!(n, params, pts, sched=innersched, maxiter=maxiter_inner, tol=tol_inner,
+        newton_interp!(n, params, pts, tol=tol_inner,
             funcs=funcs)
         iter += 1
     end
@@ -395,9 +434,6 @@ function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; funcs,verbose=false, 
     if start_fp64
         newgrd = convert(MinimaxGrid{T}, newgrd)
     end
-    newgrd = compute_minimax_grid(newgrd, R, funcs=funcs,
-        innersched=ParameterSchedulers.Sequence([0.1, 1], [4]),
-        outersched=ParameterSchedulers.Sequence([0.125, 1], [4])
-    )
+    newgrd = compute_minimax_grid(newgrd, R, funcs=funcs)
     return newgrd, K
 end

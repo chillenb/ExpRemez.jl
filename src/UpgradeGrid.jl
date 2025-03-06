@@ -1,4 +1,3 @@
-
 function upgrade_freq_gridsize_guess(coefs, gridpts, interp_pts)
   n = length(coefs)
   m = length(interp_pts)
@@ -18,10 +17,11 @@ function upgrade_freq_gridsize_guess(coefs, gridpts, interp_pts)
 
   ptsnew = log.((m+1:-1:2))./log(m+1) .* interp_pts
   ptsnew = [ptsnew; xi_ratio * ptsnew[end]; xi_ratio^2 * ptsnew[end]]
+  ptsnew = [interp_pts; xi_ratio * interp_pts[end]; xi_ratio^2 * interp_pts[end]]
 
   
-  coefs = [coefs; a0] .^ ((n+1)/(n+3))
-  gridpts = [gridpts; b0] .^ ((n+1)/(n+3))
+  coefs = [coefs; a0]
+  gridpts = [gridpts; b0]
   return coefs, gridpts, ptsnew
 end
 
@@ -53,8 +53,9 @@ Try to create a new grid with a larger size from the existing grid.
 Works best with R large.
 """
 function upgrade_gridsize(grd::MinimaxGrid{T}; funcs, upgrade_guess,
-  initialdamping=ParameterSchedulers.Sequence([0.01, 0.04, 0.125, 1.0], [10, 10, 5]),
-  outersched=ParameterSchedulers.Sequence([0.125, 0.5, 1], [4, 4])
+  #initialdamping=ParameterSchedulers.Sequence([0.01, 0.04, 0.125, 1.0], [10, 10, 5]),
+  #outersched=ParameterSchedulers.Sequence([0.125, 0.5, 1], [4, 4]),
+  verbose=false
   ) where {T}
   conv_err = T(1)
   R = maximum(grd.extrema)
@@ -67,7 +68,7 @@ function upgrade_gridsize(grd::MinimaxGrid{T}; funcs, upgrade_guess,
 
   params = merge_params(n, coefs, gridpts)
 
-  newton_interp!(n, params, interp_pts, sched=initialdamping; funcs=funcs)
+  #newton_interp!(n, params, interp_pts, sched=initialdamping; funcs=funcs)
   R = interp_pts[end]^2/interp_pts[end-1]
 
   # conv_err = T(1)
@@ -89,7 +90,7 @@ function upgrade_gridsize(grd::MinimaxGrid{T}; funcs, upgrade_guess,
 
   while conv_err > tol
       stepsize = T(1)
-      rate = T(outersched(iter))
+      #rate = T(outersched(iter))
       newton_interp!(n, params, interp_pts, funcs=funcs)
       mu = get_extrema_bounded(n, params, interp_pts, R; funcs=funcs)
       ph = funcs.alternant(n, params, mu)
@@ -99,8 +100,8 @@ function upgrade_gridsize(grd::MinimaxGrid{T}; funcs, upgrade_guess,
       linesearch_done = false
       phnorm = GenericLinearAlgebra.norm(ph)
       while !linesearch_done
-        if stepsize < 1e-20
-            error("Stepsize too small")
+        if stepsize < 1e-10
+            throw(StepSizeException("Stepsize too small"))
         end
         try
             interp_pts_new = interp_pts .- stepsize * update_vec
@@ -114,13 +115,21 @@ function upgrade_gridsize(grd::MinimaxGrid{T}; funcs, upgrade_guess,
                 params .= params_new
                 linesearch_done = true
             else
-                println(GenericLinearAlgebra.norm(ph_new), " ", phnorm)
-                println("Decreasing stepsize")
                 stepsize /= 2
             end
         catch e
-            println("Newton failed, decreasing stepsize")
-            stepsize /= 2
+            if isa(e, GenericLinearAlgebra.SingularException) ||
+              isa(e, StepSizeException) ||
+              isa(e, MaxIterException) ||
+              isa(e, ArgumentError)
+              stepsize /= 2
+            else
+              rethrow(e)
+            end
+        finally
+          if verbose
+            println("Outer stepsize: ", stepsize)
+          end
         end
       end
       conv_err = GenericLinearAlgebra.norm(ph)

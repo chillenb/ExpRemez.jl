@@ -3,6 +3,7 @@ using JLD2
 import Base: convert
 
 export MinimaxGrid
+export write_grid
 
 mutable struct MinimaxGrid{T}
   n::Int64
