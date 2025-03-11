@@ -10,13 +10,7 @@ import Base: convert
 
 using PrecompileTools: @setup_workload, @compile_workload    # this is a small dependency
 
-export expsum_eval, dparams_dxi, expsum_jacobian, expsum_xderiv, newton_interp_by_expsum, newton_interp_by_expsum!
-export fscalar, fderiv_scalar
-export dparams_dxi, phi_grad_ab, phi, phi_grad_xi, phi_fdiff_grad_xi, params_grad_xi
-
-export lorentzsum_eval, lorentzsum_eval!, dparams_dxi_lorentz, lorentzsum_jacobian, lorentzsum_xderiv
-export lorentzsum_jacobian!, lorentzsum_jacobian_xderiv, lphi_grad_ab, lphi, lphi_grad_xi
-export gscalar, gderiv_scalar
+export newton_interp_by_expsum, newton_interp_by_expsum!
 
 export get_extrema_bounded, compute_minimax_grid, merge_params, split_params
 export get_extrema_unbounded, bound_extrema, is_R_inf, _grd1inf
@@ -26,18 +20,15 @@ export upgrade_gridsize, expand_grid, write_grid, shrink_grid
 export MinimaxGrid
 export write_grid
 export _freqgrd1inf_even
+export funcs_freq_even, funcs_time
 
 include("MinimaxGridDef.jl")
 using .MinimaxGridDef
 
 include("Autocode.jl")
-
-include("ExpAnsatz.jl")
-
-include("ExpEval.jl")
-include("LorentzEval.jl")
 include("Data.jl")
 include("Optimizer.jl")
+include("UpgradeGrid.jl")
 
 # @setup_workload begin
 #     @compile_workload begin
@@ -60,11 +51,18 @@ include("Optimizer.jl")
 #     end
 # end
 
+@variables _x, _a, _b
+funcs_time = gen_funs(1/_x, exp(-_b*_x), _b, _x)
+funcs_freq_even = gen_funs(1/_x, (_x/(_x^2+_b^2))^2, _b, _x);
+
 @setup_workload begin
   @compile_workload begin
     grd = convert(MinimaxGrid{Double64}, _grd1inf)
-    @variables _x, _a, _b
-    funcs = gen_funs(1/_x, exp(-_b*_x), _b, _x);
+    compute_minimax_grid(grd, 20, funcs=funcs_time)
+    upgrade_gridsize(grd, funcs=funcs_time, upgrade_guess=upgrade_time_gridsize_guess)
+    grd_f = convert(MinimaxGrid{Double64}, _freqgrd1inf_even)
+    compute_minimax_grid(grd_f, 20, funcs=funcs_freq_even)
+    upgrade_gridsize(grd_f, funcs=funcs_freq_even, upgrade_guess=upgrade_freq_gridsize_guess)
   end
 end
 

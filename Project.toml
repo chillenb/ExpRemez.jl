@@ -9,7 +9,6 @@ GenericLinearAlgebra = "14197337-ba66-59df-a3e3-ca00e7dcff7a"
 JLD2 = "033835bb-8acc-5ee8-8aae-3f567f8a3819"
 NonlinearSolve = "8913a72c-1f9b-4ce2-8d82-65094dcecaec"
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
-RuntimeGeneratedFunctions = "7e49a35a-f44a-4d26-94aa-eba1b4ca6b47"
 Symbolics = "0c5d862f-8b57-4792-8d23-62f2024744c7"
 
 [compat]
@@ -18,7 +17,6 @@ GenericLinearAlgebra = "0.3.15"
 JLD2 = "0.5.11"
 NonlinearSolve = "4.4.0"
 PrecompileTools = "1.2.1"
-RuntimeGeneratedFunctions = "0.5.13"
 Symbolics = "6.29.1"
 
 [extras]

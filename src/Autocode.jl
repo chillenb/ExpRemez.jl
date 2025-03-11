@@ -1,15 +1,36 @@
 
 using Symbolics
-using RuntimeGeneratedFunctions
-RuntimeGeneratedFunctions.init(@__MODULE__)
+using GenericLinearAlgebra
+
+"""
+  merge_params(n, coeffs, gridpts)
+
+Merge the coefficients and exponents into a single array.
+"""
+function merge_params(n, coeffs::Array{T}, gridpts::Array{T}) where {T}
+  @assert n == length(gridpts)
+  @assert n == length(coeffs)
+  params = Array{T}(undef, 2n)
+  params[1:n] .= coeffs
+  params[n+1:end] .= gridpts
+  return params
+end
+
+function split_params(n, params::Array{T}) where {T}
+  @assert 2 * n == length(params)
+  @views coeffs = params[1:n]
+  @views exponents = params[n+1:end]
+  return coeffs, exponents
+end
+
 
 function gen_funs(targetfn, basicexpr, b, x)
   #targetfn is usually 1/x
   #basicf is usually exp(-b*x)
 
-  ex_basic = Symbolics.build_function(basicexpr, b, x, expression=false)
-  ex_deriv_x = Symbolics.build_function(Symbolics.derivative(basicexpr, x, simplify=true), b, x, expression=false)
-  ex_deriv_b = Symbolics.build_function(Symbolics.derivative(basicexpr, b, simplify=true), b, x, expression=false)
+  ex_basic = Symbolics.build_function(basicexpr, b, x, expression=Val{true})
+  ex_deriv_x = Symbolics.build_function(Symbolics.derivative(basicexpr, x, simplify=true), b, x, expression=Val{true})
+  ex_deriv_b = Symbolics.build_function(Symbolics.derivative(basicexpr, b, simplify=true), b, x, expression=Val{true})
 
 
   func_eval = :((a,b,x) -> begin
@@ -20,8 +41,8 @@ function gen_funs(targetfn, basicexpr, b, x)
           $ex_deriv_x.(b',x)*a
         end)
   
-  ex_target = Symbolics.build_function(targetfn, x, expression=false)
-  ex_target_deriv_x = Symbolics.build_function(Symbolics.derivative(targetfn, x, simplify=true), x, expression=false)
+  ex_target = Symbolics.build_function(targetfn, x, expression=Val{true})
+  ex_target_deriv_x = Symbolics.build_function(Symbolics.derivative(targetfn, x, simplify=true), x, expression=Val{true})
 
   target_eval = :((x) -> begin
           $ex_target.(x)
@@ -39,7 +60,8 @@ function gen_funs(targetfn, basicexpr, b, x)
         end)
 
   jacobian! = :((n, params, x, J) -> begin
-          @views a, b = params[1:n], params[n+1:end]
+          a = view(params, 1:n)
+          b = view(params, n+1:2*n)
           J[:, 1:n] .= -$ex_basic.(b', x)
           J[:, n+1:end] .= -a' .* $ex_deriv_b.(b', x)
           nothing
@@ -51,29 +73,25 @@ function gen_funs(targetfn, basicexpr, b, x)
       end)
   
   alternant = :((n, params, μ) -> begin
-          @views a, b = params[1:n], params[n+1:end]
+          a = view(params, 1:n)
+          b = view(params, n+1:2*n)
           fvals = $ex_target.(μ) .- $ex_basic.(b',μ)*a
           @views return fvals[1:end-1] .+ fvals[2:end]
         end)
   
   alternant_grad_ab = :((n, params, μ) -> begin
-          @views a, b = params[1:n], params[n+1:end]
           ∇F = $jacobian(n, params, μ)
           @assert length(μ) == 2 * n + 1
-          @views ∇ϕ = ∇F[1:2*n, :] .+ ∇F[2:2*n+1, :]
-          return ∇ϕ
+          @views return ∇F[1:2*n, :] .+ ∇F[2:2*n+1, :]
         end)
 
   dparams_dxi = :((n, params, ξ) -> begin
-          @views a, b = params[1:n], params[n+1:end]
+          a = view(params, 1:n)
+          b = view(params, n+1:2*n)
           ∇F_params = $jacobian(n, params, ξ)
           npts = length(ξ)
-          ∇F_ξ = similar(ξ, npts, npts)
-          ∇F_ξ .= 0.0
           de_dξ = $errderiv_eval(a,b,ξ)
-          @inbounds for i = 1:2*n
-              ∇F_ξ[i, i] = de_dξ[i]
-          end
+          ∇F_ξ = GenericLinearAlgebra.diagm(0 => de_dξ)
           return -∇F_params \ ∇F_ξ
         end)
 
@@ -83,17 +101,17 @@ function gen_funs(targetfn, basicexpr, b, x)
           return phi_g_ab * f_g_ab
         end)
 
-  return (func_eval=@RuntimeGeneratedFunction(func_eval),
-          funcderiv_eval=@RuntimeGeneratedFunction(funcderiv_eval),
-          target_eval=@RuntimeGeneratedFunction(target_eval),
-          targetderiv_eval=@RuntimeGeneratedFunction(targetderiv_eval),
-          err_eval=@RuntimeGeneratedFunction(err_eval),
-          errderiv_eval=@RuntimeGeneratedFunction(errderiv_eval),
-          jacobian=@RuntimeGeneratedFunction(jacobian),
-          jacobian! = @RuntimeGeneratedFunction(jacobian!),
-          alternant=@RuntimeGeneratedFunction(alternant),
-          alternant_grad_ab=@RuntimeGeneratedFunction(alternant_grad_ab),
-          alternant_grad_xi=@RuntimeGeneratedFunction(alternant_grad_xi),
-          dparams_dxi=@RuntimeGeneratedFunction(dparams_dxi))
+return (func_eval=eval(func_eval),
+        funcderiv_eval=eval(funcderiv_eval),
+        target_eval=eval(target_eval),
+        targetderiv_eval=eval(targetderiv_eval),
+        err_eval=eval(err_eval),
+        errderiv_eval=eval(errderiv_eval),
+        jacobian=eval(jacobian),
+        jacobian! = eval(jacobian!),
+        alternant=eval(alternant),
+        alternant_grad_ab=eval(alternant_grad_ab),
+        alternant_grad_xi=eval(alternant_grad_xi),
+        dparams_dxi=eval(dparams_dxi))
 
 end

@@ -259,8 +259,6 @@ function compute_minimax_grid(start::MinimaxGrid{T}, R;
     return grd
 end
 
-include("UpgradeGrid.jl")
-
 # """
 #     upgrade_gridsize(grd::MinimaxGrid)
 
