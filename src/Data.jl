@@ -18,9 +18,30 @@ _freqgrd1inf_even = MinimaxGrid{BigFloat}(
   Inf
 )
 
+_freqgrd1inf_odd = MinimaxGrid{BigFloat}(
+  1,
+  BigFloat[12.83013190047857844056796130010307640470879116260759159268539637099617829924789],
+  BigFloat[3.491919609864169009150077434624860815283122688738879716775700129037478610600371],
+  BigFloat[1.179702561107968621890080248425389475304039688196927823530565519809231113466411, 3.179523866915632870899820237617804711547881785750113259802746811968607201185638],
+  BigFloat[1.0, 1.80755059799962212626232663915747242191043405645376390125079334546953029962865, 6.745870668986096834116314227577911847895426718617963827206137568527921899869949],
+  0.1012490063043079376759496432598710660164219512074158669017629294935446624748657,
+  Inf
+)
 
-function load_grids_inf()
-  grids_inf_path = pkgdir(ExpRemez, "data", "grids_inf_100.jld2")
+seed_grids = Dict(
+  "time" => _grd1inf,
+  "freq_even" => _freqgrd1inf_even,
+  "freq_odd" => _freqgrd1inf_odd
+)
+
+grids_inf_fnames = Dict(
+  "time" => "time_grids_inf_100.jld2",
+  "freq_even" => "freq_even_grids_inf_100.jld2",
+  "freq_odd" => "freq_odd_grids_inf_100.jld2"
+)
+
+function load_grids_inf(key="time")
+  grids_inf_path = pkgdir(ExpRemez, "data", grids_inf_fnames[key])
   grids_inf_asdict = JLD2.load(grids_inf_path, nested=true)
   grids_inf = Dict()
   for k in 1:100

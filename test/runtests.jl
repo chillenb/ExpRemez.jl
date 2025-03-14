@@ -13,11 +13,13 @@ function grids_are_close(grd1, grd2; atol)
   isapprox(grd1.R, grd2.R; atol=atol)
 end
 
-@testset "bootstrap" begin
+@testset verbose = true "bootstrap" begin
   grd = convert(MinimaxGrid{Double64}, ExpRemez._grd1inf)
   @test grids_are_close(grd, time_grids_inf[1]; atol=1e-15)
-  for i = 2:10
-    grd = upgrade_gridsize(grd, funcs=ExpRemez.funcs_time, upgrade_guess=ExpRemez.upgrade_time_gridsize_guess)
-    @test grids_are_close(grd, time_grids_inf[i]; atol=1e-15)
+  @testset "upgrade_grid $i" for i = 2:15
+    grd_new = upgrade_gridsize(grd, funcs=ExpRemez.funcs_time, upgrade_guess=ExpRemez.upgrade_time_gridsize_guess)
+    grd_new = compute_minimax_grid(grd_new, Inf, funcs=ExpRemez.funcs_time)
+    @test grids_are_close(grd_new, time_grids_inf[i]; atol=1e-15)
+    grd = deepcopy(grd_new)
   end
 end

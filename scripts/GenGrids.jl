@@ -1,17 +1,14 @@
 using ExpRemez
-using GenericLinearAlgebra
-using NonlinearSolve
-using DoubleFloats
-import ParameterSchedulers
 using JLD2
 
+using MKL
 using LinearAlgebra
 BLAS.set_num_threads(1)
 
-grds_inf = ExpRemez.load_grids_inf()
 
 
-function gen_from_grid_inf(orig_grd::MinimaxGrid{T}, Rlist, progress=true) where {T}
+
+function gen_from_grid_inf(orig_grd::MinimaxGrid{T}, Rlist; funcs, progress=true, verbose=true) where {T}
   if progress
     println("Started grid of size ", orig_grd.n)
   end
@@ -20,20 +17,29 @@ function gen_from_grid_inf(orig_grd::MinimaxGrid{T}, Rlist, progress=true) where
 
   sorted_Rs = T.(sort(Rlist[Rlist.<R0], rev=true))
   results = []
-  start_fp64 = true
+  start_fp64 = (grd.err / grd.n > 1e-13)
   for R in sorted_Rs
-    try
-      grd, dtype = shrink_grid(grd, R, 1.1, verbose=false, start_fp64=start_fp64)
-      if dtype != Float64
-        if progress && start_fp64
-          println("n: ", grd.n, ", Disabling low precision start")
+    conv = false
+    while !conv
+      try
+        grd, dtype = shrink_grid(grd, R, 1.1, verbose=verbose, start_fp64=start_fp64, funcs=funcs)
+        if dtype != Float64
+          if progress && start_fp64
+            println("n: ", grd.n, ", Disabling low precision start")
+          end
+          #start_fp64 = false
         end
-        start_fp64 = false
+        conv = true
+        push!(results, deepcopy(grd))
+      catch e
+        if start_fp64
+          println("n: ", grd.n, ", Disabling low precision start")
+          start_fp64 = false
+        else
+          println("Error: ", e)
+          exit(1)
+        end
       end
-      push!(results, deepcopy(grd))
-    catch e
-      println("Error: ", e)
-      break
     end
   end
   if progress
@@ -45,6 +51,12 @@ end
 kmax = parse(Int64, ARGS[2])
 kmin = parse(Int64, ARGS[3])
 fname = ARGS[1]
+
+key = ARGS[4] # "time", "freq_even", "freq_odd"
+
+
+grds_inf = ExpRemez.load_grids_inf(key)
+opt_funcs = ExpRemez.funcs_all[key]
 
 Rlist = collect(1:9) .* exp10.(3:12)'
 Rlist = Rlist[:]
@@ -58,7 +70,7 @@ res = []
 mylock = ReentrantLock()
 
 Threads.@threads :greedy for i in kmax:-1:kmin
-  res_i = gen_from_grid_inf(grds_inf[i], Rlist)
+  res_i = gen_from_grid_inf(grds_inf[i], Rlist; funcs=opt_funcs)
   lock(mylock)
   try
     append!(res, res_i)

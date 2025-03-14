@@ -25,6 +25,35 @@ function upgrade_freq_gridsize_guess(coefs, gridpts, interp_pts)
   return coefs, gridpts, ptsnew
 end
 
+function upgrade_freq_odd_gridsize_guess(coefs, gridpts, interp_pts)
+  n = length(coefs)
+  m = length(interp_pts)
+  tpts = interp_pts .^ (n/(n+1))
+  tcoefs = coefs .^ (n/(n+1))
+  tgridpts = gridpts .^ (n/(n+1))
+  if n > 1
+      b_ratio = tgridpts[end] / tgridpts[end-1]
+      a_ratio = tcoefs[end] / tcoefs[end-1]
+      xi_ratio = tpts[end] / tpts[end-1]
+  else
+      b_ratio = 2
+      a_ratio = 2
+      xi_ratio = 2
+  end
+
+
+  b0 = b_ratio * tgridpts[end]
+  a0 = a_ratio * tcoefs[end]
+
+  
+  ptsnew = [tpts; xi_ratio * tpts[end]; xi_ratio^2 * tpts[end]]
+
+  
+  coefs = [tcoefs; a0]
+  gridpts = [tgridpts; b0]
+  return coefs, gridpts, ptsnew
+end
+
 function upgrade_time_gridsize_guess(coefs, gridpts, interp_pts)
   n = length(coefs)
   if n > 1
@@ -45,6 +74,12 @@ function upgrade_time_gridsize_guess(coefs, gridpts, interp_pts)
   exponents = [b0; gridpts]
 return coefs, exponents, pts
 end
+
+upgrade_guesses = Dict(
+  "time" => upgrade_time_gridsize_guess,
+  "freq_even" => upgrade_freq_gridsize_guess,
+  "freq_odd" => upgrade_freq_odd_gridsize_guess
+)
 
 """
   upgrade_gridsize(grd::MinimaxGrid)
