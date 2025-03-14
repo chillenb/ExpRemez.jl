@@ -18,7 +18,7 @@ function newton_interp!(n::Int64, params::Array{T}, ξ::Array{T};
     maxiter=20,
     tol=T(0.0),
     stepsize_min=T(1e-10),
-    verbose=false) where {T}
+    verbose=0) where {T}
 
     if tol == T(0.0)
         tol = n * eps(T(1.0)) * 1e3
@@ -71,8 +71,8 @@ function newton_interp!(n::Int64, params::Array{T}, ξ::Array{T};
 
         iter += 1
     end
-    if verbose
-        println("inner $iter")
+    if verbose > 2
+        println("inner iters: $iter")
     end
 end
 
@@ -97,7 +97,10 @@ newton_interp_by_expsum = newton_interp
 Compute the extrema of the the error on the intervals [1, ξ[1]], [ξ[1], ξ[2]], ..., [ξ[2n-1], ξ[2n]], [ξ[2n], Inf].
 """
 function get_extrema_unbounded(n::Int64, params::Array{T}, ξ::Array{T}; abs_tol=0.0,
-    funcs) where {T}
+    verbose=0, funcs) where {T}
+    if verbose > 3
+        println("begin get_extrema_unbounded")
+    end
     if abs_tol != 0.0
         tol = T(abs_tol)
     else
@@ -134,6 +137,9 @@ function get_extrema_unbounded(n::Int64, params::Array{T}, ξ::Array{T}; abs_tol
         # prob = IntervalNonlinearProblem(fder_function, (pts[2*n+1], c))
         # μ[2*n+1] = solve(prob, abstol=T(tol)).u
         μ[2*n+1] = find_zero(fder, (pts[2*n+1], c), Roots.AlefeldPotraShi())
+    end
+    if verbose > 3
+        println("end get_extrema_unbounded")
     end
     return μ
 end
@@ -178,7 +184,7 @@ end
 
 
 
-function compute_minimax_grid(start::MinimaxGrid{T}, R;
+function compute_minimax_grid(startgrd::MinimaxGrid{T}, R;
     # outersched=ParameterSchedulers.Constant(T(1)),
     # innersched=ParameterSchedulers.Constant(T(1)),
     tol=0.0,
@@ -186,28 +192,30 @@ function compute_minimax_grid(start::MinimaxGrid{T}, R;
     maxiter_inner=Inf,
     maxiter=Inf,
     stepsize_min=1e-10,
-    verbose=false,
+    verbose=0,
     funcs) where {T}
     tol = T(tol)
     tol_inner = T(tol_inner)
 
+    start = deepcopy(startgrd)
+
     R = T(R)
     n = start.n
     params = merge_params(start.n, start.coefs, start.gridpts)
-    pts = copy(start.interp_pts)
+    pts = start.interp_pts
     if tol == T(0.0)
         tol = eps(T(1.0)) * 2 * n * 1e3
     end
     iter = 1
     newton_interp!(n, params, pts, maxiter=maxiter_inner, tol=tol_inner,
     funcs=funcs)
-    mu = get_extrema_bounded(n, params, pts, R; funcs=funcs)
+    mu = get_extrema_bounded(n, params, pts, R; funcs=funcs, verbose=verbose)
     ph = funcs.alternant(n, params, mu)
     conv_err = GenericLinearAlgebra.norm(ph)
 
     while conv_err > tol && iter <= maxiter
         stepsize = T(1)
-        mu = get_extrema_bounded(n, params, pts, R; funcs=funcs)
+        mu = get_extrema_bounded(n, params, pts, R; funcs=funcs, verbose=verbose)
         ph = funcs.alternant(n, params, mu)
         phg = funcs.alternant_grad_xi(n, params, mu, pts)
         update_vec = phg \ ph
@@ -221,8 +229,8 @@ function compute_minimax_grid(start::MinimaxGrid{T}, R;
                 pts_new = pts .- stepsize * update_vec
                 params_new = copy(params)
                 newton_interp!(n, params_new, pts_new, tol=tol_inner,
-                    funcs=funcs)
-                mu_new = get_extrema_bounded(n, params_new, pts_new, R; funcs=funcs)
+                    funcs=funcs, verbose=verbose, maxiter=maxiter_inner)
+                mu_new = get_extrema_bounded(n, params_new, pts_new, R; funcs=funcs, verbose=verbose)
                 ph_new = funcs.alternant(n, params_new, mu_new)
                 if GenericLinearAlgebra.norm(ph_new) < phnorm
                     pts .= pts_new
@@ -230,14 +238,17 @@ function compute_minimax_grid(start::MinimaxGrid{T}, R;
                     params .= params_new
                     linesearch_done = true
                 else
-                    if verbose
+                    if verbose > 2
                         println(GenericLinearAlgebra.norm(ph_new), " ", phnorm)
-                        println("Decreasing stepsize")
+                        println("Decreasing stepsize from $stepsize to $(stepsize/2)")
                     end
                     stepsize /= 2
                 end
             catch e
-                if verbose
+                if e isa InterruptException
+                    rethrow(e)
+                end
+                if verbose > 2
                     println("Newton failed, decreasing stepsize")
                 end
                 stepsize /= 2
@@ -245,16 +256,20 @@ function compute_minimax_grid(start::MinimaxGrid{T}, R;
         end
         conv_err = GenericLinearAlgebra.norm(ph)
         newton_interp!(n, params, pts, tol=tol_inner,
-            funcs=funcs)
+            funcs=funcs, verbose=verbose)
         iter += 1
     end
     if conv_err > tol
         error("Failed to converge")
     end
+    if verbose > 2
+        println("outer opt converged after $iter iterations with error $conv_err")
+    end
+
     @views coefs, exponents = params[1:n], params[n+1:end]
     f = (x)->begin funcs.err_eval(coefs, exponents, x) end
     abs_err = maximum(abs, f(mu))
-    mu_unbounded = get_extrema_unbounded(n, params, pts; funcs=funcs)
+    mu_unbounded = get_extrema_unbounded(n, params, pts; funcs=funcs, verbose=verbose)
     mu = bound_extrema(n, mu_unbounded, R)
     abs_err = maximum(abs, f(mu))
     grd = MinimaxGrid(n, sort(coefs), sort(exponents), sort(pts), sort(mu_unbounded), abs_err, R)
@@ -292,7 +307,7 @@ function expand_grid(grd::MinimaxGrid{T}, R, expand_ratio; funcs) where {T}
     return newgrd
 end
 
-function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; funcs,verbose=false, start_fp64=true) where {T}
+function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; funcs,verbose=0, start_fp64=true) where {T}
     # If the grid already has R = Inf, return it as is
     R0 = isinf(grd.R) ? grd.extrema[end] : grd.R
     @assert R < R0
@@ -313,13 +328,13 @@ function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; funcs,verbose=false, 
         maxiter_inner_final = 10
     else
         K = T
-        maxiter = 30
-        maxiter_inner = 100
+        maxiter = 10
+        maxiter_inner = 10
         maxiter_final = Inf
         maxiter_inner_final = Inf
     end
 
-    shrink_min_fp64 = 1.001
+    shrink_min_fp64 = 1.01
     shrink_min_highprec = 1.0 + 1e-6
 
     stepsize_min = T(1e-6)
@@ -328,7 +343,7 @@ function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; funcs,verbose=false, 
     err = newgrd.err
     tol_fac = 0.2
     while cur_R > R
-        if verbose
+        if verbose > 0
             println("R: ", Float64(cur_R))
         end
         conv = false
@@ -340,43 +355,52 @@ function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; funcs,verbose=false, 
                 next_R = max(cur_R / shrink_ratio, R)
                 next_R = K(next_R)
 
-                if verbose
+                if verbose > 0
                     println("Tolerance: ", tol, " next_R ", Float64(next_R))
                     println("Shrinking ratio: ", Float64(shrink_ratio))
                 end
 
                 newgrd.interp_pts .= (newgrd.interp_pts .- 1) ./ K(shrink_ratio) .+ 1
                 #newgrd = compute_minimax_grid(newgrd, K(next_R), tol=K(tol), tol_inner=K(0.5 * tol), maxiter_inner=maxiter_inner, maxiter=4; funcs=funcs)
-                newgrd = compute_minimax_grid(newgrd, K(next_R), funcs=funcs, stepsize_min=stepsize_min, maxiter=maxiter, maxiter_inner=maxiter_inner)
+                newgrd = compute_minimax_grid(
+                    newgrd,
+                    K(next_R),
+                    funcs=funcs, stepsize_min=stepsize_min,
+                    maxiter=maxiter, maxiter_inner=maxiter_inner,
+                    verbose=verbose, tol_inner=tol/n, tol=tol/n
+                )
 
                 @assert !isinf(newgrd.err)
                 conv = true
                 cur_R = next_R
                 err = newgrd.err
             catch e
+                if e isa InterruptException
+                    rethrow(e)
+                end
                 shrink_min = (K == Float64) ? shrink_min_fp64 : shrink_min_highprec
                 if shrink_ratio < shrink_min
-                    if verbose
+                    if verbose > 2
                         print(e)
                     end
                     if K == Float64
                         shrink_ratio = K(shrink_ratio_orig)
                         K = T
-                        newgrd = convert(MinimaxGrid{K}, grid_bak)
                     else
                         throw("Shrink ratio is too small, giving up")
                     end
                 end
                 shrink_ratio = 1 + (shrink_ratio - 1) / K(1.1)
+                newgrd = deepcopy(convert(MinimaxGrid{K}, grid_bak))
             end
         end
     end
     if start_fp64
         newgrd = convert(MinimaxGrid{T}, newgrd)
     end
-    if verbose
+    if verbose > 0
         println("final step")
     end
-    newgrd = compute_minimax_grid(newgrd, R, funcs=funcs, maxiter=maxiter_final, maxiter_inner=maxiter_inner_final)
-    return newgrd, K
+    newgrd = compute_minimax_grid(newgrd, R, funcs=funcs, maxiter=maxiter_final, maxiter_inner=maxiter_inner_final, verbose=verbose)
+    return newgrd, K, shrink_ratio
 end
