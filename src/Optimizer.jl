@@ -5,6 +5,9 @@ end
 struct MaxIterException <: Exception
     var :: String
 end
+struct MachinePrecisionException <: Exception
+    var :: String
+end
 
 
 """
@@ -307,7 +310,7 @@ function expand_grid(grd::MinimaxGrid{T}, R, expand_ratio; funcs) where {T}
     return newgrd
 end
 
-function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; funcs,verbose=0, start_fp64=true) where {T}
+function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; funcs,verbose=0, start_fp64=true, err_min=0.0) where {T}
     # If the grid already has R = Inf, return it as is
     R0 = isinf(grd.R) ? grd.extrema[end] : grd.R
     @assert R < R0
@@ -316,6 +319,8 @@ function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; funcs,verbose=0, star
 
 
     n = grd.n
+
+    err_min = max(T(err_min), eps(T(n^2)))
 
 
     newgrd = deepcopy(grd)
@@ -392,6 +397,9 @@ function shrink_grid(grd::MinimaxGrid{T}, R, shrink_ratio; funcs,verbose=0, star
                 end
                 shrink_ratio = 1 + (shrink_ratio - 1) / K(1.1)
                 newgrd = deepcopy(convert(MinimaxGrid{K}, grid_bak))
+            end
+            if err < err_min
+                throw(MachinePrecisionException("Error $err is below the minimum threshold $err_min"))
             end
         end
     end

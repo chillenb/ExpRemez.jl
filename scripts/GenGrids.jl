@@ -29,6 +29,10 @@ function parse_commandline()
           help = "minimum grid size"
           default = 9
           arg_type = Int
+      "--verbose", "-v"
+          help = "verbosity level (0-3)"
+          default = 0
+          arg_type = Int
       "filename"
           help = "name of JLD2 output file"
           arg_type = String
@@ -40,7 +44,7 @@ end
 
 
 
-function gen_from_grid_inf(orig_grd::MinimaxGrid{T}, Rlist; funcs, progress=true, verbose=true, shrink_start=1.1) where {T}
+function gen_from_grid_inf(orig_grd::MinimaxGrid{T}, Rlist; funcs, progress=true, verbose=0, shrink_start=1.1, err_min=0.0) where {T}
   if progress
     println("Started grid of size ", orig_grd.n)
   end
@@ -56,12 +60,12 @@ function gen_from_grid_inf(orig_grd::MinimaxGrid{T}, Rlist; funcs, progress=true
     conv = false
     while !conv
       try
-        grd, dtype, shrink_ratio_out = shrink_grid(grd, R, shrink_ratio, verbose=verbose, start_fp64=start_fp64, funcs=funcs)
+        grd, dtype, shrink_ratio_out = shrink_grid(grd, R, shrink_ratio, verbose=verbose, start_fp64=start_fp64, funcs=funcs, err_min=err_min)
         if dtype != Float64
           if progress && start_fp64
             println("n: ", grd.n, ", Disabling low precision start")
-            start_fp64 = false
           end
+          start_fp64 = false
         end
         conv = true
         push!(results, deepcopy(grd))
@@ -69,6 +73,12 @@ function gen_from_grid_inf(orig_grd::MinimaxGrid{T}, Rlist; funcs, progress=true
       catch e
         if e isa InterruptException
           rethrow(e)
+        elseif e isa ExpRemez.MachinePrecisionException
+          if progress
+            println(e)
+            println("n: ", grd.n, ", Machine precision reached")
+          end
+          return results
         end
         if start_fp64
           println("n: ", grd.n, ", Disabling low precision start")
@@ -94,6 +104,7 @@ function main()
   kmax = parsed_args["kmax"]
   kmin = parsed_args["kmin"]
   fname = parsed_args["filename"]
+  verbose = parsed_args["verbose"]
 
   key = parsed_args["grid_type"] # "time", "freq_even", "freq_odd"
 
@@ -102,18 +113,16 @@ function main()
   opt_funcs = ExpRemez.funcs_all[key]
 
   pow_max = 12
-  pow_min = 9
+  pow_min = 3
 
   Rlist = logrange(10^pow_min, 10^pow_max, 10*(pow_max - pow_min)+1)
   Rlist = Rlist[:]
-
-
 
   res = []
   mylock = ReentrantLock()
 
   Threads.@threads :greedy for i in kmax:-1:kmin
-    res_i = gen_from_grid_inf(grds_inf[i], Rlist; funcs=opt_funcs)
+    res_i = gen_from_grid_inf(grds_inf[i], Rlist; funcs=opt_funcs, verbose=verbose)
     lock(mylock)
     try
       append!(res, res_i)

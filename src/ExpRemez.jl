@@ -64,7 +64,7 @@ funcs_all = Dict(
 
 @setup_workload begin
   @compile_workload begin
-    convert(MinimaxGrid{Double64}, _grd1inf)
+    time_grid_1 = convert(MinimaxGrid{Double64}, _grd1inf)
     load_grids_inf()
     for key in ["time", "freq_even", "freq_odd"]
       for K in [Float64, Double64]
@@ -73,6 +73,7 @@ funcs_all = Dict(
         upgrade_gridsize(grd, funcs=funcs_all[key], upgrade_guess=upgrade_guesses[key])
       end
     end
+    shrink_grid(time_grid_1, 4.0, 1.1; funcs=funcs_time, start_fp64=true, err_min=1e-12)
   end
 end
 
