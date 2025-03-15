@@ -87,11 +87,7 @@ upgrade_guesses = Dict(
 Try to create a new grid with a larger size from the existing grid.
 Works best with R large.
 """
-function upgrade_gridsize(grd::MinimaxGrid{T}; funcs, upgrade_guess,
-  #initialdamping=ParameterSchedulers.Sequence([0.01, 0.04, 0.125, 1.0], [10, 10, 5]),
-  #outersched=ParameterSchedulers.Sequence([0.125, 0.5, 1], [4, 4]),
-  verbose=false
-  ) where {T}
+function upgrade_gridsize(grd::MinimaxGrid{T}; funcs, upgrade_guess, verbose=false) where {T}
   conv_err = T(1)
   R = maximum(grd.extrema)
 
@@ -103,21 +99,7 @@ function upgrade_gridsize(grd::MinimaxGrid{T}; funcs, upgrade_guess,
 
   params = merge_params(n, coefs, gridpts)
 
-  #newton_interp!(n, params, interp_pts, sched=initialdamping; funcs=funcs)
   R = interp_pts[end]^2/interp_pts[end-1]
-
-  # conv_err = T(1)
-  # while conv_err > tol
-  #     rate = T(outersched(iter))
-  #     newton_interp!(n, params, interp_pts; funcs=funcs)
-  #     mu = get_extrema_bounded(n, params, interp_pts, R; funcs=funcs)
-  #     ph = funcs.alternant(n, params, mu)
-  #     phg = funcs.alternant_grad_xi(n, params, mu, interp_pts)
-  #     interp_pts = interp_pts .- rate .* (phg \ ph)
-  #     conv_err = GenericLinearAlgebra.norm(ph)
-  #     iter += 1
-  # end
-
 
   mu = get_extrema_bounded(n, params, interp_pts, R; funcs=funcs)
   ph = funcs.alternant(n, params, mu)

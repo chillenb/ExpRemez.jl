@@ -41,8 +41,6 @@ function newton_interp!(n::Int64, params::Array{T}, ξ::Array{T};
             break
         end
 
-
-
         funcs.jacobian!(n, params, ξ, ∇F)
         dp .= ∇F \ resid
         ratio = maximum((dp ./ params) ./ maxdiff)
@@ -56,7 +54,6 @@ function newton_interp!(n::Int64, params::Array{T}, ξ::Array{T};
         new_err = err + 1
         stepsize = T(1)
         while new_err >= err
-            #println("Inner stepsize: $stepsize")
             new_params .= params .- ratio_stepsize * stepsize * dp
             if any(new_params .< 0)
                 stepsize /= 2
@@ -69,7 +66,6 @@ function newton_interp!(n::Int64, params::Array{T}, ξ::Array{T};
                 throw(StepSizeException("Stepsize too small"))
             end
         end
-        #params .-= ratio_stepsize * rate * dp
         params .= new_params
 
         iter += 1
@@ -113,14 +109,10 @@ function get_extrema_unbounded(n::Int64, params::Array{T}, ξ::Array{T}; abs_tol
     @views coeffs, exponents = params[1:n], params[n+1:end]
     fder(x) = funcs.errderiv_eval(coeffs, exponents, x)[1]
     f(x) = funcs.err_eval(coeffs, exponents, x)[1]
-    #fder_compat(x,p) = funcs.errderiv_eval(coeffs, exponents, x)[1]
 
-    #fder_function = NonlinearFunction(fder_compat)
     μ = T.(zeros(2 * n + 1))
     for i = 1:2*n
         if sign(fder(pts[i])) != sign(fder(pts[i+1]))
-            # prob = IntervalNonlinearProblem(fder_function, (pts[i], pts[i+1]))
-            # μ[i] = solve(prob, abstol=T(tol), Brent()).u
             μ[i] = find_zero(fder, (pts[i], pts[i+1]), Roots.AlefeldPotraShi())
         else
             μ[i] = (abs(f(pts[i])) > abs(f(pts[i+1]))) ? pts[i] : pts[i+1]
@@ -137,8 +129,6 @@ function get_extrema_unbounded(n::Int64, params::Array{T}, ξ::Array{T}; abs_tol
             c *= 10
         end
         # Step 2. Find the extremum
-        # prob = IntervalNonlinearProblem(fder_function, (pts[2*n+1], c))
-        # μ[2*n+1] = solve(prob, abstol=T(tol)).u
         μ[2*n+1] = find_zero(fder, (pts[2*n+1], c), Roots.AlefeldPotraShi())
     end
     if verbose > 3
@@ -188,8 +178,6 @@ end
 
 
 function compute_minimax_grid(startgrd::MinimaxGrid{T}, R;
-    # outersched=ParameterSchedulers.Constant(T(1)),
-    # innersched=ParameterSchedulers.Constant(T(1)),
     tol=0.0,
     tol_inner=0.0,
     maxiter_inner=Inf,
