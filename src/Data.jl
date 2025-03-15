@@ -41,9 +41,9 @@ grids_inf_fnames = Dict(
 )
 
 grids_finite_fnames = Dict(
-  "time" => "time_grids_finite_50.jld2",
+  "time" => "time_grids_finite_100.jld2",
   "freq_even" => "freq_even_grids_finite_50.jld2",
-  "freq_odd" => "freq_odd_grids_finite_50.jld2"
+  "freq_odd" => "freq_odd_grids_finite_100.jld2"
 )
 
 function load_grids_inf(key="time")
