@@ -40,6 +40,12 @@ grids_inf_fnames = Dict(
   "freq_odd" => "freq_odd_grids_inf_100.jld2"
 )
 
+grids_finite_fnames = Dict(
+  "time" => "time_grids_finite_50.jld2",
+  "freq_even" => "freq_even_grids_finite_50.jld2",
+  "freq_odd" => "freq_odd_grids_finite_50.jld2"
+)
+
 function load_grids_inf(key="time")
   grids_inf_path = pkgdir(ExpRemez, "data", grids_inf_fnames[key])
   grids_inf_asdict = JLD2.load(grids_inf_path, nested=true)
@@ -48,4 +54,10 @@ function load_grids_inf(key="time")
       grids_inf[k] = convert(MinimaxGrid{Double64}, grids_inf_asdict["$k"])
   end
   return grids_inf
+end
+
+function load_grids_finite(key="time")
+  grids_finite_path = pkgdir(ExpRemez, "data", grids_finite_fnames[key])
+  grids_finite_asdict = JLD2.load(grids_finite_path, nested=true)
+  return grids_finite_asdict
 end

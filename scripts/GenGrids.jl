@@ -137,7 +137,7 @@ function main()
     n = r.n
     R = r.R
     if isinf(R)
-      grd_name = "$n"*"_inf"
+      grd_name = "$(key)_$(n)_inf"
     else
       rstring = @sprintf "%.3E" Float64(R)
       grd_name = "$(key)_$(n)_$(rstring)"
